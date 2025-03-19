@@ -46,10 +46,10 @@ cargo install --path .
 
 ```bash
 # Generate comment using OpenAI (default)
-mr-comment --api-key YOUR_OPENAI_API_KEY
+mr-comment --api-key YOUR_CLAUDE_API_KEY
 
-# Generate comment using Claude
-mr-comment --provider claude --api-key YOUR_CLAUDE_API_KEY
+# Generate comment using OpenAI
+mr-comment --provider openai --api-key YOUR_OPENAI_API_KEY
 
 # Generate comment for a specific commit
 mr-comment --commit a1b2c3d
@@ -60,14 +60,12 @@ mr-comment --range "HEAD~3..HEAD"
 # Read diff from file
 mr-comment --file path/to/diff.txt
 
-# Save API key to config (won't need to provide it in future commands)
-mr-comment --api-key YOUR_API_KEY --provider claude --save-config
 
 # Write output to file
 mr-comment --output mr-comment.md
 
 # Use a different model
-mr-comment --provider claude --model claude-3-haiku-20240307
+mr-comment --provider claude --model claude-3-haiku-20240307  # Example of using a different model
 ```
 
 ### Options
@@ -79,10 +77,10 @@ mr-comment --provider claude --model claude-3-haiku-20240307
 - `-p, --provider <PROVIDER>`: API provider to use (openai or claude)
 - `-e, --endpoint <ENDPOINT>`: API endpoint (defaults based on provider)
 - `-m, --model <MODEL>`: Model to use (defaults based on provider)
-- `-s, --save-config`: Save API key and endpoint to config file
 - `-r, --range <RANGE>`: Git diff range (e.g., "HEAD~3..HEAD")
 - `-h, --help`: Print help
 - `-V, --version`: Print version
+- `--debug`: Debug mode - estimate token usage and exit
 
 ## Configuration
 
@@ -90,21 +88,19 @@ The tool will look for configuration in the following order:
 
 1. Command line arguments
 2. Environment variables (`OPENAI_API_KEY` for OpenAI or `ANTHROPIC_API_KEY` for Claude)
-3. Saved configuration file (`~/.mr-comment`)
-
-You can save your API key and preferred endpoint to a configuration file using the `--save-config` option.
+3. Environment variables (`OPENAI_API_KEY` for OpenAI or `ANTHROPIC_API_KEY` for Claude)
 
 ### Default Values
+
+#### Claude
+
+- Endpoint: `https://api.anthropic.com/v1/messages`
+- Model: `claude-3-7-sonnet-20250219`
 
 #### OpenAI
 
 - Endpoint: `https://api.openai.com/v1/chat/completions`
 - Model: `gpt-4-turbo`
-
-#### Claude
-
-- Endpoint: `https://api.anthropic.com/v1/messages`
-- Model: `claude-3-opus-20240229`
 
 ## Example Output
 

@@ -11,6 +11,7 @@ use std::process::{Command, Stdio};
 
 // CLI arguments definition
 #[derive(Clone, Debug, ValueEnum)]
+#[value(rename_all = "lowercase")]
 enum ApiProvider {
     OpenAi,
     Claude,
@@ -24,12 +25,12 @@ enum ApiProvider {
     about = "Generate GitLab MR comments from git diffs using AI"
 )]
 struct Cli {
-    /// Specific commit to generate comment for (default: HEAD)
-    #[arg(short, long)]
+    /// Specific commit to generate comment for (default: HEAD) [cannot be used with --range]
+    #[arg(short, long, conflicts_with = "range")]
     commit: Option<String>,
 
-    /// Read diff from file instead of git command
-    #[arg(short, long)]
+    /// Read diff from file instead of git command [cannot be used with --commit or --range]
+    #[arg(short, long, conflicts_with_all = ["commit", "range"])]
     file: Option<PathBuf>,
 
     /// Write output to file instead of stdout
@@ -41,7 +42,13 @@ struct Cli {
     api_key: Option<String>,
 
     /// API provider to use
-    #[arg(short = 'p', long = "provider", value_enum, default_value = "openai")]
+    #[arg(
+        short = 'p',
+        long = "provider",
+        value_enum,
+        default_value = "claude",
+        value_name = "PROVIDER"
+    )]
     provider: ApiProvider,
 
     /// API endpoint (defaults based on provider)
@@ -52,13 +59,13 @@ struct Cli {
     #[arg(short, long)]
     model: Option<String>,
 
-    /// Save API key and endpoint to config file
-    #[arg(short, long)]
-    save_config: bool,
-
-    /// Git diff range (e.g., "HEAD~3..HEAD")
-    #[arg(short, long)]
+    /// Git diff range (e.g., "HEAD~3..HEAD") [cannot be used with --commit]
+    #[arg(short, long, conflicts_with = "commit")]
     range: Option<String>,
+
+    /// Debug mode - estimate token usage and exit
+    #[arg(long)]
+    debug: bool,
 }
 
 // Configuration structure
@@ -118,24 +125,13 @@ impl Config {
 
         let config_str = fs::read_to_string(&config_path)
             .with_context(|| format!("Failed to read config file: {}", config_path.display()))?;
-        
+
         let config: Config = serde_json::from_str(&config_str)
             .with_context(|| format!("Failed to parse config file: {}", config_path.display()))?;
-        
+
         Ok(config)
     }
 
-    fn save(&self) -> Result<()> {
-        let config_path = get_config_path()?;
-        let config_str = serde_json::to_string_pretty(self)
-            .context("Failed to serialize config")?;
-        
-        fs::write(&config_path, config_str)
-            .with_context(|| format!("Failed to write config file: {}", config_path.display()))?;
-        
-        println!("Config saved successfully.");
-        Ok(())
-    }
 }
 
 fn get_config_path() -> Result<PathBuf> {
@@ -147,23 +143,23 @@ fn get_config_path() -> Result<PathBuf> {
 // Prompt template
 struct PromptTemplate {
     purpose: &'static str,
-    instructions: &'static str,
+    instructions: &'static str, 
 }
 
 impl PromptTemplate {
     fn new() -> Self {
         PromptTemplate {
             purpose: "Create standard gitlab MR comment",
-            instructions: "Carefully review the git-log previosuly provided and then Generate a concise, professional MR comment based on that git log. Use a structured format that includes:
-•\tMR Title: A short 1 sentance summary for use in a gitlab MR title
-•\tMR Summary: A brief overview of the changes.
-•\tKey Changes: A bulleted list of major updates or improvements.
-•\tWhy These Changes: A short explanation of the motivation behind the changes.
-•\tReview Checklist: A list of items for reviewers to verify. Use a markdown checkbox for each item
-•\tNotes: Additional context or guidance.
-Follow the style of simplifying technical details while maintaining clarity and professionalism. 
+             instructions: "Carefully review the git-log previosuly provided and then Generate a concise, professional MR comment based on that git log. Use a structured format that includes
+ •\tMR Title:\n A short 1 sentance summary for use in a gitlab MR title [dont include the title header]
+ •\tMR Summary:\n A brief overview of the changes. [dont include the summary header]
+ •\t## Key Changes:\n A bulleted list of major updates or improvements.
+ •\t## Why These Changes:\n A short explanation of the motivation behind the changes.
+ •\t## Review Checklist:\n A list of items for reviewers to verify. Use a markdown checkbox for each item
+ •\t## Notes:\n Additional context or guidance.
+ Follow the style of simplifying technical details while maintaining clarity and professionalism. Always add a blank line after the heading.
 
-ONLY produce the MR comment and no additional questions or prompts",
+ ONLY produce the MR comment and no additional questions or prompts. The git diff may be truncated due to length - focus analysis on the provided sections.",
         }
     }
 
@@ -174,34 +170,131 @@ ONLY produce the MR comment and no additional questions or prompts",
 
 fn get_diff_from_git(commit: Option<&str>, range: Option<&str>) -> Result<String> {
     let mut cmd = Command::new("git");
-    
+
     if let Some(range_str) = range {
         cmd.args(["diff", range_str]);
     } else if let Some(commit_str) = commit {
-        cmd.args(["show", commit_str]);
+        // Handle HEAD specially - compare working tree to latest commit
+        if commit_str == "HEAD" {
+            cmd.args(["diff", "HEAD"]);
+        } else {
+            // For other commits, compare commit with its parent
+            cmd.args(["diff", &format!("{}^", commit_str), commit_str]);
+        }
     } else {
-        cmd.args(["show", "HEAD"]);
+        // Default to showing staged+unstaged changes
+        cmd.args(["diff"]);
     }
-    
+
     let output = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
         .context("Failed to execute git command")?;
-    
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("Git command failed: {}", stderr);
     }
-    
+
     let diff = String::from_utf8(output.stdout)
         .context("Failed to parse git output as UTF-8")?;
-    
-    if diff.trim().is_empty() {
+
+    // Process diff to summarize new/deleted files and filter binaries
+    let mut filtered_lines = Vec::new();
+    let mut new_files = Vec::new();
+    let mut deleted_files = Vec::new();
+    let mut current_file = None;
+    let mut in_delete = false;
+    let mut in_new = false;
+
+    for line in diff.lines() {
+        if line.starts_with("Binary files") {
+            continue;
+        }
+
+        if line.starts_with("diff --git") {
+            // Check if previous file was new/deleted
+            if let Some(file) = current_file.take() {
+                if in_new {
+                    new_files.push(file);
+                } else if in_delete {
+                    deleted_files.push(file);
+                }
+            }
+
+            // Reset state for new diff block
+            in_delete = false;
+            in_new = false;
+            current_file = line.split(' ').nth(2).map(|s| s.trim_start_matches("a/").to_string());
+            continue;
+        }
+
+        // Detect new/deleted file markers
+        if line.starts_with("+++ /dev/null") {
+            in_delete = true;
+        } else if line.starts_with("--- /dev/null") {
+            in_new = true;
+        }
+
+        // Only keep non-new/non-deleted file chunks
+        if !in_new && !in_delete {
+            filtered_lines.push(line);
+        }
+    }
+
+    // Add any remaining file
+    if let Some(file) = current_file.take() {
+        if in_new {
+            new_files.push(file);
+        } else if in_delete {
+            deleted_files.push(file);
+        }
+    }
+
+    // Build summary of new/deleted files
+    let mut summary = String::new();
+    if !new_files.is_empty() {
+        summary += "\nNew files:\n";
+        for file in new_files {
+            summary += &format!("• {}\n", file);
+        }
+    }
+    if !deleted_files.is_empty() {
+        summary += "\nDeleted files:\n";
+        for file in deleted_files {
+            summary += &format!("• {}\n", file);
+        }
+    }
+
+    let mut filtered_diff = filtered_lines.join("\n");
+    filtered_diff += &summary;
+
+    if filtered_diff.trim().is_empty() {
         anyhow::bail!("No diff content found");
     }
+
+    Ok(filtered_diff)
+}
+
+fn truncate_diff(diff: &str, max_lines: usize) -> (String, usize) {
+    let lines: Vec<&str> = diff.lines().collect();
+    let original_len = lines.len();
+    if lines.len() <= max_lines {
+        return (diff.to_string(), original_len);
+    }
     
-    Ok(diff)
+    // Keep beginning and end of diff since most relevant content is there
+    let truncated = lines[..max_lines/2].join("\n")
+        + "\n[...diff truncated...]\n"
+        + &lines[lines.len()-max_lines/2..].join("\n");
+    
+    (truncated, original_len)
+}
+
+fn estimate_tokens(text: &str) -> usize {
+    // Claude counts ~4 chars per token, OpenAI ~3.5 - we'll use conservative estimate
+    (text.len() as f64 / 3.5).ceil() as usize
 }
 
 fn generate_mr_comment(
@@ -210,10 +303,19 @@ fn generate_mr_comment(
     endpoint: &str,
     model: &str,
     provider: &ApiProvider,
+    _check: bool,
 ) -> Result<String> {
     let client = Client::new();
     let prompt = PromptTemplate::new();
-    
+
+    // Truncate diff to 10k lines (keeps first/last 5000 lines)
+    let (truncated_diff, original_len) = truncate_diff(diff, 10000);
+    let diff_warning = if original_len > 10000 {
+        format!(" (truncated from {} lines)", original_len)
+    } else {
+        String::new()
+    };
+
     match provider {
         ApiProvider::OpenAi => {
             let request_body = json!({
@@ -225,12 +327,12 @@ fn generate_mr_comment(
                     },
                     {
                         "role": "user",
-                        "content": format!("Git diff:\n\n{}", diff)
+                        "content": format!("Git diff{}:\n\n{}", diff_warning, truncated_diff)
                     }
                 ],
                 "temperature": 0.7
             });
-            
+
             let response = client
                 .post(endpoint)
                 .header("Content-Type", "application/json")
@@ -238,19 +340,19 @@ fn generate_mr_comment(
                 .json(&request_body)
                 .send()
                 .context("Failed to call OpenAI API")?;
-            
+
             if !response.status().is_success() {
                 let error_text = response.text().unwrap_or_else(|_| "Could not read error response".to_string());
                 anyhow::bail!("OpenAI API request failed: {}", error_text);
             }
-            
+
             let response_body: OpenAIResponse = response.json()
                 .context("Failed to parse OpenAI API response")?;
-            
+
             if response_body.choices.is_empty() {
                 anyhow::bail!("OpenAI API response contained no choices");
             }
-            
+
             Ok(response_body.choices[0].message.content.clone())
         },
         ApiProvider::Claude => {
@@ -260,13 +362,13 @@ fn generate_mr_comment(
                 "messages": [
                     {
                         "role": "user",
-                        "content": format!("Git diff:\n\n{}", diff)
+                        "content": format!("Git diff{}:\n\n{}", diff_warning, truncated_diff)
                     }
                 ],
                 "temperature": 0.7,
                 "max_tokens": 4000
             });
-            
+
             let response = client
                 .post(endpoint)
                 .header("Content-Type", "application/json")
@@ -275,26 +377,26 @@ fn generate_mr_comment(
                 .json(&request_body)
                 .send()
                 .context("Failed to call Claude API")?;
-            
+
             if !response.status().is_success() {
                 let error_text = response.text().unwrap_or_else(|_| "Could not read error response".to_string());
                 anyhow::bail!("Claude API request failed: {}", error_text);
             }
-            
+
             let response_body: ClaudeResponse = response.json()
                 .context("Failed to parse Claude API response")?;
-            
+
             if response_body.content.is_empty() {
                 anyhow::bail!("Claude API response contained no content");
             }
-            
+
             // Find the first text content
             for content in response_body.content {
                 if content.content_type == "text" {
                     return Ok(content.text);
                 }
             }
-            
+
             anyhow::bail!("Claude API response contained no text content");
         }
     }
@@ -302,10 +404,10 @@ fn generate_mr_comment(
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    
+
     // Load config
-    let mut config = Config::load()?;
-    
+    let config = Config::load()?;
+
     // Get default values based on provider
     let (default_endpoint, default_model, env_var_key) = match cli.provider {
         ApiProvider::OpenAi => (
@@ -315,7 +417,7 @@ fn main() -> Result<()> {
         ),
         ApiProvider::Claude => (
             "https://api.anthropic.com/v1/messages",
-            "claude-3-opus-20240229",
+            "claude-3-7-sonnet-20250219",
             "ANTHROPIC_API_KEY"
         ),
     };
@@ -330,7 +432,7 @@ fn main() -> Result<()> {
             }
         })
         .context(format!("API key is required. Provide it with --api-key or set {} environment variable", env_var_key))?;
-    
+
     // Get endpoint from CLI or config
     let endpoint = cli.endpoint.clone().unwrap_or_else(|| {
         match cli.provider {
@@ -338,7 +440,7 @@ fn main() -> Result<()> {
             ApiProvider::Claude => config.claude_endpoint.clone().unwrap_or_else(|| default_endpoint.to_string()),
         }
     });
-    
+
     // Get model from CLI or config
     let model = cli.model.clone().unwrap_or_else(|| {
         match cli.provider {
@@ -346,25 +448,8 @@ fn main() -> Result<()> {
             ApiProvider::Claude => config.claude_model.clone().unwrap_or_else(|| default_model.to_string()),
         }
     });
-    
-    // Save config if requested
-    if cli.save_config {
-        match cli.provider {
-            ApiProvider::OpenAi => {
-                config.openai_api_key = Some(api_key.clone());
-                config.openai_endpoint = Some(endpoint.clone());
-                config.openai_model = Some(model.clone());
-            },
-            ApiProvider::Claude => {
-                config.claude_api_key = Some(api_key.clone());
-                config.claude_endpoint = Some(endpoint.clone());
-                config.claude_model = Some(model.clone());
-            },
-        }
-        config.provider = Some(format!("{:?}", cli.provider));
-        config.save()?;
-    }
-    
+
+
     // Get the diff
     let diff = if let Some(file_path) = cli.file {
         let mut file = fs::File::open(&file_path)
@@ -376,20 +461,33 @@ fn main() -> Result<()> {
     } else {
         get_diff_from_git(cli.commit.as_deref(), cli.range.as_deref())?
     };
-    
+
     // Generate MR comment
-    let mr_comment = generate_mr_comment(&diff, &api_key, &endpoint, &model, &cli.provider)?;
-    
+    // If in debug mode
+    if cli.debug {
+        let system_message = PromptTemplate::new().system_message();
+        let (truncated_diff, original_len) = truncate_diff(&diff, 4000);
+        let diff_tokens = estimate_tokens(&truncated_diff);
+        let system_tokens = estimate_tokens(&system_message);
+        
+        println!("Token estimation:");
+        println!("- System prompt: {} tokens", system_tokens);
+        println!("- Diff content: {} tokens ({} lines)", diff_tokens, original_len);
+        println!("- Total estimate: {} tokens", system_tokens + diff_tokens);
+        println!("Claude's limit: 200,000 tokens");
+        return Ok(());
+    }
+
+    let mr_comment = generate_mr_comment(&diff, &api_key, &endpoint, &model, &cli.provider, cli.debug)?;
+
     // Output result
     if let Some(output_path) = cli.output {
         fs::write(&output_path, &mr_comment)
             .with_context(|| format!("Failed to write to file: {}", output_path.display()))?;
         println!("MR comment written to {}", output_path.display());
     } else {
-        println!("\n--- Generated MR Comment ---\n");
         println!("{}", mr_comment);
-        println!("\n---------------------------\n");
     }
-    
+
     Ok(())
 }
