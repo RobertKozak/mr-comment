@@ -45,7 +45,7 @@ cargo install --path .
 ## Usage
 
 ```bash
-# Generate comment using OpenAI (default)
+# Generate comment using Claude (default)
 mr-comment --api-key YOUR_CLAUDE_API_KEY
 
 # Generate comment using OpenAI
@@ -59,7 +59,6 @@ mr-comment --commit "HEAD~3..HEAD"
 
 # Read diff from file
 mr-comment --file path/to/diff.txt
-
 
 # Write output to file
 mr-comment --output mr-comment.md
