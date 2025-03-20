@@ -3,7 +3,7 @@ name = "mr-comment"
 version = "0.1.0"
 edition = "2021"
 description = "CLI tool to generate GitLab MR comments from git diffs using AI (OpenAI or Claude)"
-authors = [""]
+authors = ["Robert Kozak"]
 license = "MIT"
 
 [dependencies]
