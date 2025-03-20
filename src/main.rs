@@ -45,9 +45,7 @@ Examples:
   mr-comment --output mr-comment.md
 
   # Use a different model
-  mr-comment --provider claude --model claude-3-haiku-20240307
-
-Configuration is read from ~/.mr-comment or environment variables"#
+  mr-comment --provider claude --model claude-3-haiku-20240307"#
 )]
 struct Cli {
     /// Commit or range to generate comment for (e.g. "HEAD" or "HEAD~3..HEAD")
