@@ -55,7 +55,7 @@ mr-comment --provider openai --api-key YOUR_OPENAI_API_KEY
 mr-comment --commit a1b2c3d
 
 # Generate comment for a range of commits
-mr-comment --range "HEAD~3..HEAD"
+mr-comment --commit "HEAD~3..HEAD"
 
 # Read diff from file
 mr-comment --file path/to/diff.txt
@@ -77,7 +77,6 @@ mr-comment --provider claude --model claude-3-haiku-20240307  # Example of using
 - `-p, --provider <PROVIDER>`: API provider to use (openai or claude)
 - `-e, --endpoint <ENDPOINT>`: API endpoint (defaults based on provider)
 - `-m, --model <MODEL>`: Model to use (defaults based on provider)
-- `-r, --range <RANGE>`: Git diff range (e.g., "HEAD~3..HEAD")
 - `-h, --help`: Print help
 - `-V, --version`: Print version
 - `--debug`: Debug mode - estimate token usage and exit

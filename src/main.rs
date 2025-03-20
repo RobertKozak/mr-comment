@@ -25,12 +25,12 @@ enum ApiProvider {
     about = "Generate GitLab MR comments from git diffs using AI"
 )]
 struct Cli {
-    /// Specific commit to generate comment for (default: HEAD) [cannot be used with --range]
-    #[arg(short, long, conflicts_with = "range")]
+    /// Commit or range to generate comment for (e.g. "HEAD" or "HEAD~3..HEAD")
+    #[arg(short, long)]
     commit: Option<String>,
 
-    /// Read diff from file instead of git command [cannot be used with --commit or --range]
-    #[arg(short, long, conflicts_with_all = ["commit", "range"])]
+    /// Read diff from file instead of git command [cannot be used with --commit]
+    #[arg(short, long, conflicts_with = "commit")]
     file: Option<PathBuf>,
 
     /// Write output to file instead of stdout
@@ -58,10 +58,6 @@ struct Cli {
     /// Model to use (defaults based on provider)
     #[arg(short, long)]
     model: Option<String>,
-
-    /// Git diff range (e.g., "HEAD~3..HEAD") [cannot be used with --commit]
-    #[arg(short, long, conflicts_with = "commit")]
-    range: Option<String>,
 
     /// Debug mode - estimate token usage and exit
     #[arg(long)]
@@ -157,7 +153,7 @@ impl PromptTemplate {
  •\t## Why These Changes:\n A short explanation of the motivation behind the changes.
  •\t## Review Checklist:\n A list of items for reviewers to verify. Use a markdown checkbox for each item
  •\t## Notes:\n Additional context or guidance.
- Follow the style of simplifying technical details while maintaining clarity and professionalism. Always add a blank line after the heading.
+ Follow the style of simplifying technical details while maintaining clarity and professionalism. ALWAYS add a blank line after each heading.
 
  ONLY produce the MR comment and no additional questions or prompts. The git diff may be truncated due to length - focus analysis on the provided sections.",
         }
@@ -168,17 +164,17 @@ impl PromptTemplate {
     }
 }
 
-fn get_diff_from_git(commit: Option<&str>, range: Option<&str>) -> Result<String> {
+fn get_diff_from_git(cli: &Cli) -> Result<String> {
     let mut cmd = Command::new("git");
 
-    if let Some(range_str) = range {
-        cmd.args(["diff", range_str]);
-    } else if let Some(commit_str) = commit {
-        // Handle HEAD specially - compare working tree to latest commit
-        if commit_str == "HEAD" {
+    if let Some(commit_str) = &cli.commit {
+        // Check if it's a range
+        if commit_str.contains("..") {
+            cmd.args(["diff", commit_str]);
+        } else if commit_str == "HEAD" {
             cmd.args(["diff", "HEAD"]);
         } else {
-            // For other commits, compare commit with its parent
+            // Single commit - compare with its parent
             cmd.args(["diff", &format!("{}^", commit_str), commit_str]);
         }
     } else {
@@ -423,7 +419,7 @@ fn main() -> Result<()> {
     };
 
     // Get API key from CLI, env var, or config
-    let api_key = cli.api_key
+    let api_key = cli.api_key.clone()
         .or_else(|| env::var(env_var_key).ok())
         .or_else(|| {
             match cli.provider {
@@ -459,7 +455,7 @@ fn main() -> Result<()> {
             .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
         content
     } else {
-        get_diff_from_git(cli.commit.as_deref(), cli.range.as_deref())?
+        get_diff_from_git(&cli)?
     };
 
     // Generate MR comment
