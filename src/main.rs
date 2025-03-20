@@ -22,7 +22,32 @@ enum ApiProvider {
     name = "mr-comment",
     author = "",
     version,
-    about = "Generate GitLab MR comments from git diffs using AI"
+    about = "Generate GitLab MR comments from git diffs using AI",
+    long_about = r#"Generate professional GitLab MR comments from git diffs using AI
+
+Examples:
+  # Generate comment using Claude (default)
+  mr-comment --api-key YOUR_API_KEY
+
+  # Generate comment using OpenAI
+  mr-comment --provider openai --api-key YOUR_OPENAI_KEY
+
+  # Generate comment for a specific commit
+  mr-comment --commit a1b2c3d
+
+  # Generate comment for a range of commits
+  mr-comment --commit "HEAD~3..HEAD"
+
+  # Read diff from file
+  mr-comment --file path/to/diff.txt
+
+  # Write output to file
+  mr-comment --output mr-comment.md
+
+  # Use a different model
+  mr-comment --provider claude --model claude-3-haiku-20240307
+
+Configuration is read from ~/.mr-comment or environment variables"#
 )]
 struct Cli {
     /// Commit or range to generate comment for (e.g. "HEAD" or "HEAD~3..HEAD")
