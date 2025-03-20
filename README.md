@@ -104,13 +104,11 @@ The tool will look for configuration in the following order:
 ## Example Output
 
 ```markdown
-## MR Title: Implement user authentication system
-
-### MR Summary
+Implement user authentication system
 
 This MR adds a complete user authentication system including login, registration, password reset, and account management.
 
-### Key Changes
+## Key Changes
 
 - Added user model with secure password hashing
 - Implemented JWT-based authentication
@@ -118,11 +116,11 @@ This MR adds a complete user authentication system including login, registration
 - Added password reset functionality
 - Included comprehensive test coverage
 
-### Why These Changes
+## Why These Changes
 
 These changes provide a secure authentication foundation for the application, allowing users to create accounts and access protected features.
 
-### Review Checklist
+## Review Checklist
 
 - [ ] Verify all authentication routes are properly protected
 - [ ] Check password hashing implementation
@@ -130,7 +128,7 @@ These changes provide a secure authentication foundation for the application, al
 - [ ] Confirm test coverage for edge cases
 - [ ] Validate error handling for invalid credentials
 
-### Notes
+## Notes
 
 The implementation follows OWASP security guidelines and includes rate limiting to prevent brute force attacks.
 ```
