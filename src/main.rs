@@ -127,6 +127,20 @@ struct ClaudeContent {
     content_type: String,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            openai_api_key: None,
+            claude_api_key: None,
+            openai_endpoint: Some("https://api.openai.com/v1/chat/completions".into()),
+            claude_endpoint: Some("https://api.anthropic.com/v1/messages".into()),
+            openai_model: Some("gpt-4-turbo".into()),
+            claude_model: Some("claude-3-7-sonnet-20250219".into()),
+            provider: None,
+        }
+    }
+}
+
 impl Config {
     fn load() -> Result<Self> {
         let config_path = get_config_path()?;
@@ -169,14 +183,20 @@ impl PromptTemplate {
     fn new() -> Self {
         PromptTemplate {
             purpose: "Create standard gitlab MR comment",
-             instructions: "Carefully review the git-log previosuly provided and then Generate a concise, professional MR comment based on that git log. Use a structured format that includes
- •\tMR Title:\n A short 1 sentance summary for use in a gitlab MR title [dont include the title header]
- •\tMR Summary:\n A brief overview of the changes. [dont include the summary header]
- •\t## Key Changes:\n A bulleted list of major updates or improvements.
- •\t## Why These Changes:\n A short explanation of the motivation behind the changes.
- •\t## Review Checklist:\n A list of items for reviewers to verify. Use a markdown checkbox for each item
- •\t## Notes:\n Additional context or guidance.
- Follow the style of simplifying technical details while maintaining clarity and professionalism. ALWAYS add a blank line after each heading.
+             instructions: "Carefully review the git-log previously provided and then generate a concise, professional MR comment based on that git log. Use a structured format that includes:
+ •\tMR Title:\nA short 1 sentence summary for use in a gitlab MR title [don't include the title header]
+ •\tMR Summary:\nA brief overview of the changes [don't include the summary header]
+ •\t## Key Changes:\n\nA bulleted list of major updates or improvements
+ •\t## Why These Changes:\n\nA short explanation of the motivation behind the changes
+ •\t## Review Checklist:\n\nA list of items for reviewers to verify. Use markdown checkboxes
+ •\t## Notes:\n\nAdditional context or guidance
+ Follow the style of simplifying technical details while maintaining clarity and professionalism. ALWAYS add a blank line after each heading using '\\n\\n' to ensure proper spacing.
+
+ Example format:
+ ## Key Changes:
+ 
+ • Added new API client abstraction
+ • Updated error handling implementation
 
  ONLY produce the MR comment and no additional questions or prompts. The git diff may be truncated due to length - focus analysis on the provided sections.",
         }
