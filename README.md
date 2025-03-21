@@ -6,9 +6,12 @@ A command-line tool written in Rust that generates professional GitLab Merge Req
 
 - Reads git diffs from current repo or from a file
 - Supports both OpenAI and Claude (Anthropic) APIs
-- Customizable API endpoint and model
+- Customizable API endpoints and models
+- Configuration file support (~/.mr-comment)
+- Environment variable configuration
 - Outputs to console or to a file
-- Saves configuration for ease of use
+- Proper error handling with context
+- Diff truncation and token estimation
 - Native binary with no runtime dependencies (thanks to Rust)
 
 ## Installation
@@ -143,10 +146,12 @@ The implementation follows OWASP security guidelines and includes rate limiting 
 
 - `clap`: Command line argument parsing
 - `reqwest`: HTTP client for API calls
-- `serde` and `serde_json`: JSON serialization/deserialization
+- `serde`/`serde_json`: JSON serialization
 - `anyhow`: Error handling
-- `dirs`: Finding user's home directory
-- `tokio`: Async runtime (although we're using reqwest in blocking mode)
+- `dirs`: Home directory detection
+- `thiserror`: Custom error types
+- `tokio`: Async runtime (reqwest compatibility)
+- `chrono`: Timestamp handling (indirect dependency)
 
 ## License
 
