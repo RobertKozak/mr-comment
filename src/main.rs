@@ -22,8 +22,8 @@ enum ApiProvider {
     name = "mr-comment",
     author = "",
     version,
-    about = "Generate GitLab MR comments from git diffs using AI",
-    long_about = r#"Generate professional GitLab MR comments from git diffs using AI
+    about = "Generate GitLab MR/GitHub PR comments from git diffs using AI",
+    long_about = r#"Generate professional GitLab MR or GitHub PR comments from git diffs using AI
 
 Examples:
   # Generate comment using Claude (default)
@@ -173,32 +173,72 @@ fn get_config_path() -> Result<PathBuf> {
     Ok(path)
 }
 
+#[derive(Clone, Copy)]
+enum GitHost {
+    GitHub,
+    GitLab,
+    Unknown,
+}
+
+fn detect_git_host() -> Result<GitHost> {
+    let output = Command::new("git")
+        .args(["remote", "-v"])
+        .output()
+        .context("Failed to execute git remote command")?;
+
+    let output_str = String::from_utf8_lossy(&output.stdout);
+    let origin_line = output_str.lines()
+        .find(|l| l.starts_with("origin"))
+        .context("No origin remote found")?;
+
+    let url = origin_line.split_whitespace().nth(1).unwrap_or("");
+    if url.contains("github.com") {
+        Ok(GitHost::GitHub)
+    } else if url.contains("gitlab.com") {
+        Ok(GitHost::GitLab)
+    } else {
+        Ok(GitHost::Unknown)
+    }
+}
+
 // Prompt template
 struct PromptTemplate {
-    purpose: &'static str,
-    instructions: &'static str, 
+    purpose: String,
+    instructions: String,
 }
 
 impl PromptTemplate {
-    fn new() -> Self {
+    fn new(host: GitHost) -> Self {
+        let (purpose, platform, artifact) = match host {
+            GitHost::GitHub => ("GitHub PR comment", "GitHub", "PR"),
+            GitHost::GitLab => ("GitLab MR comment", "GitLab", "MR"),
+            GitHost::Unknown => ("MR/PR comment", "version control system", "MR/PR"),
+        };
+
+        let instructions = format!(r#"Carefully review the provided git diff and generate a concise, professional {artifact} comment. Use this format:
+
+{artifact} Title: [1-sentence summary]
+{artifact} Summary: [brief overview]
+## Key Changes: [bulleted list of major updates]
+## Why These Changes: [motivation explanation]
+## Review Checklist: [markdown checkboxes]
+## Notes: [additional context]
+
+Formatting rules:
+- Use {platform}-appropriate terminology
+- Maintain technical clarity while being concise
+- Add blank lines after headings using '\n\n'
+- Never include section headers in title/summary
+- Adapt structure to {platform} conventions
+
+Example {artifact} Title: Add user authentication middleware
+Example {artifact} Summary: Implemented JWT-based authentication flow for API endpoints
+
+The git diff may be truncated - focus analysis on visible changes."#);
+
         PromptTemplate {
-            purpose: "Create standard gitlab MR comment",
-             instructions: "Carefully review the git-log previously provided and then generate a concise, professional MR comment based on that git log. Use a structured format that includes:
- •\tMR Title:\nA short 1 sentence summary for use in a gitlab MR title [don't include the title header]
- •\tMR Summary:\nA brief overview of the changes [don't include the summary header]
- •\t## Key Changes:\n\nA bulleted list of major updates or improvements
- •\t## Why These Changes:\n\nA short explanation of the motivation behind the changes
- •\t## Review Checklist:\n\nA list of items for reviewers to verify. Use markdown checkboxes
- •\t## Notes:\n\nAdditional context or guidance
- Follow the style of simplifying technical details while maintaining clarity and professionalism. ALWAYS add a blank line after each heading using '\\n\\n' to ensure proper spacing.
-
- Example format:
- ## Key Changes:
- 
- • Added new API client abstraction
- • Updated error handling implementation
-
- ONLY produce the MR comment and no additional questions or prompts. The git diff may be truncated due to length - focus analysis on the provided sections.",
+            purpose: purpose.to_string(),
+            instructions,
         }
     }
 
@@ -342,10 +382,11 @@ fn generate_mr_comment(
     endpoint: &str,
     model: &str,
     provider: &ApiProvider,
+    host: GitHost,
     _check: bool,
 ) -> Result<String> {
     let client = Client::new();
-    let prompt = PromptTemplate::new();
+    let prompt = PromptTemplate::new(host);
 
     // Truncate diff to 10k lines (keeps first/last 5000 lines)
     let (truncated_diff, original_len) = truncate_diff(diff, 10000);
@@ -501,10 +542,12 @@ fn main() -> Result<()> {
         get_diff_from_git(&cli)?
     };
 
-    // Generate MR comment
-    // If in debug mode
+    // Detect Git host and generate comment
+    let git_host = detect_git_host().unwrap_or(GitHost::Unknown);
+    
+    // Generate MR/PR comment
     if cli.debug {
-        let system_message = PromptTemplate::new().system_message();
+        let system_message = PromptTemplate::new(git_host).system_message();
         let (truncated_diff, original_len) = truncate_diff(&diff, 4000);
         let diff_tokens = estimate_tokens(&truncated_diff);
         let system_tokens = estimate_tokens(&system_message);
@@ -517,7 +560,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mr_comment = generate_mr_comment(&diff, &api_key, &endpoint, &model, &cli.provider, cli.debug)?;
+    let mr_comment = generate_mr_comment(&diff, &api_key, &endpoint, &model, &cli.provider, git_host, cli.debug)?;
 
     // Output result
     if let Some(output_path) = cli.output {
