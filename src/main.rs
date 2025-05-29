@@ -8,6 +8,7 @@ use std::fs;
 use std::io::{Read};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use regex::Regex;
 
 // CLI arguments definition
 #[derive(Clone, Debug, ValueEnum)]
@@ -187,14 +188,25 @@ fn detect_git_host() -> Result<GitHost> {
         .context("Failed to execute git remote command")?;
 
     let output_str = String::from_utf8_lossy(&output.stdout);
-    let origin_line = output_str.lines()
-        .find(|l| l.starts_with("origin"))
+
+    // Regular expression to match SSH and HTTPS URLs
+    let re = Regex::new(r"(git@|https://)([^:/]+)").unwrap();
+
+    // Find the first remote URL
+    let url = output_str
+        .lines()
+        .find_map(|line| {
+            if line.starts_with("origin") {
+                re.captures(line).map(|caps| caps[2].to_string())
+            } else {
+                None
+            }
+        })
         .context("No origin remote found")?;
 
-    let url = origin_line.split_whitespace().nth(1).unwrap_or("");
-    if url.contains("github.com") {
+    if url.contains("github") {
         Ok(GitHost::GitHub)
-    } else if url.contains("gitlab.com") {
+    } else if url.contains("gitlab") {
         Ok(GitHost::GitLab)
     } else {
         Ok(GitHost::Unknown)
@@ -229,7 +241,8 @@ Formatting rules:
 - Maintain technical clarity while being concise
 - Add blank lines after headings using '\n\n'
 - Never include section headers in title/summary
-- Adapt structure to {platform} conventions
+- Adapt structure to {platform} completions
+- use standard {platform} markdown syntax
 
 Example {artifact} Title: Add user authentication middleware
 Example {artifact} Summary: Implemented JWT-based authentication flow for API endpoints
