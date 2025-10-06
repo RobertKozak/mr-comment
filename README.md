@@ -5,7 +5,8 @@ A command-line tool written in Rust that generates professional GitLab Merge Req
 ## Features
 
 - Reads git diffs from current repo or from a file
-- Supports both OpenAI and Claude (Anthropic) APIs
+- Supports OpenAI API, Claude API, and Claude Code CLI (uses your subscription!)
+- **NEW**: Use your Claude Pro/Max subscription via Claude Code CLI - no API keys needed!
 - Customizable API endpoints and models
 - Configuration file support (~/.mr-comment)
 - Environment variable configuration
@@ -20,7 +21,10 @@ A command-line tool written in Rust that generates professional GitLab Merge Req
 
 - Rust and Cargo (install via [rustup](https://rustup.rs/))
 - Git
-- OpenAI API key or Claude API key
+- One of the following:
+  - **Claude Code CLI** with Pro/Max subscription (recommended - no API costs!)
+  - OpenAI API key
+  - Claude API key
 
 ### Building from source
 
@@ -48,7 +52,10 @@ cargo install --path .
 ## Usage
 
 ```bash
-# Generate comment using Claude (default)
+# Generate comment using Claude Code CLI (uses your subscription - no API key needed!)
+mr-comment --provider claudecode
+
+# Generate comment using Claude API (default)
 mr-comment --api-key YOUR_CLAUDE_API_KEY
 
 # Generate comment using OpenAI
@@ -66,8 +73,8 @@ mr-comment --file path/to/diff.txt
 # Write output to file
 mr-comment --output mr-comment.md
 
-# Use a different model
-mr-comment --provider claude --model claude-3-haiku-20240307  # Example of using a different model
+# Use a different model (API providers only)
+mr-comment --provider claude --model claude-3-haiku-20240307
 ```
 
 ### Options
@@ -75,25 +82,41 @@ mr-comment --provider claude --model claude-3-haiku-20240307  # Example of using
 - `-c, --commit <COMMIT>`: Specific commit to generate comment for (default: HEAD)
 - `-f, --file <FILE>`: Read diff from file instead of git command
 - `-o, --output <FILE>`: Write output to file instead of stdout
-- `-k, --api-key <API_KEY>`: API key (can also use OPENAI_API_KEY or ANTHROPIC_API_KEY env var)
-- `-p, --provider <PROVIDER>`: API provider to use (openai or claude)
-- `-e, --endpoint <ENDPOINT>`: API endpoint (defaults based on provider)
-- `-m, --model <MODEL>`: Model to use (defaults based on provider)
+- `-k, --api-key <API_KEY>`: API key (can also use OPENAI_API_KEY or ANTHROPIC_API_KEY env var) - not needed for claudecode
+- `-p, --provider <PROVIDER>`: Provider to use: `claudecode` (uses subscription), `claude` (API), or `openai` (API)
+- `-e, --endpoint <ENDPOINT>`: API endpoint (defaults based on provider, not used for claudecode)
+- `-m, --model <MODEL>`: Model to use (defaults based on provider, not used for claudecode)
 - `-h, --help`: Print help
 - `-V, --version`: Print version
 - `--debug`: Debug mode - estimate token usage and exit
 
 ## Configuration
 
+### Using Claude Code CLI (Recommended)
+
+To use your Claude Pro/Max subscription instead of API keys:
+
+1. Install Claude Code CLI (if not already installed): https://docs.claude.com/en/docs/claude-code
+2. Authenticate with your subscription: Run `claude` and use `/login`
+3. Use the tool: `mr-comment --provider claudecode`
+
+**Important**: Make sure you don't have `ANTHROPIC_API_KEY` environment variable set, as it would override your subscription authentication.
+
+### Using API Keys
+
 The tool will look for configuration in the following order:
 
 1. Command line arguments
 2. Environment variables (`OPENAI_API_KEY` for OpenAI or `ANTHROPIC_API_KEY` for Claude)
-3. Environment variables (`OPENAI_API_KEY` for OpenAI or `ANTHROPIC_API_KEY` for Claude)
 
 ### Default Values
 
-#### Claude
+#### Claude Code CLI
+
+- Uses your authenticated Claude Code session
+- Model selection handled by Claude Code CLI
+
+#### Claude API
 
 - Endpoint: `https://api.anthropic.com/v1/messages`
 - Model: `claude-3-7-sonnet-20250219`

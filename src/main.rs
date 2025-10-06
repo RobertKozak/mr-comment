@@ -16,6 +16,7 @@ use regex::Regex;
 enum ApiProvider {
     OpenAi,
     Claude,
+    ClaudeCode,
 }
 
 #[derive(Parser)]
@@ -27,7 +28,10 @@ enum ApiProvider {
     long_about = r#"Generate professional GitLab MR or GitHub PR comments from git diffs using AI
 
 Examples:
-  # Generate comment using Claude (default)
+  # Generate comment using Claude Code CLI (uses your subscription, no API key needed)
+  mr-comment --provider claudecode
+
+  # Generate comment using Claude API (default)
   mr-comment --api-key YOUR_API_KEY
 
   # Generate comment using OpenAI
@@ -70,7 +74,7 @@ struct Cli {
         short = 'p',
         long = "provider",
         value_enum,
-        default_value = "claude",
+        default_value = "claudecode",
         value_name = "PROVIDER"
     )]
     provider: ApiProvider,
@@ -491,6 +495,55 @@ fn generate_mr_comment(
             }
 
             anyhow::bail!("Claude API response contained no text content");
+        },
+        ApiProvider::ClaudeCode => {
+            // Use Claude Code CLI in non-interactive mode
+            let full_prompt = format!(
+                "{}\n\nGit diff{}:\n\n{}",
+                prompt.system_message(),
+                diff_warning,
+                truncated_diff
+            );
+
+            // Find claude executable - try common locations
+            let home = dirs::home_dir().context("Could not find home directory")?;
+            let local_claude = home.join(".claude/local/claude");
+
+            let claude_cmd = if local_claude.exists() {
+                local_claude.to_string_lossy().to_string()
+            } else {
+                // Try to find in PATH using shell
+                match Command::new("sh").arg("-c").arg("command -v claude").output() {
+                    Ok(output) if output.status.success() => {
+                        String::from_utf8_lossy(&output.stdout).trim().to_string()
+                    },
+                    _ => "claude".to_string() // Fallback to just "claude" and hope it's in PATH
+                }
+            };
+
+            let output = Command::new(&claude_cmd)
+                .arg("-p")
+                .arg(&full_prompt)
+                .arg("--output-format")
+                .arg("text")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .context("Failed to execute claude command. Make sure Claude Code CLI is installed and authenticated.")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                anyhow::bail!("Claude Code CLI failed: {}", stderr);
+            }
+
+            let response = String::from_utf8(output.stdout)
+                .context("Failed to parse Claude Code CLI output as UTF-8")?;
+
+            if response.trim().is_empty() {
+                anyhow::bail!("Claude Code CLI returned empty response");
+            }
+
+            Ok(response.trim().to_string())
         }
     }
 }
@@ -513,24 +566,35 @@ fn main() -> Result<()> {
             "claude-3-7-sonnet-20250219",
             "ANTHROPIC_API_KEY"
         ),
+        ApiProvider::ClaudeCode => (
+            "", // No endpoint needed for Claude Code CLI
+            "", // Model is handled by CLI
+            ""  // No API key needed
+        ),
     };
 
-    // Get API key from CLI, env var, or config
-    let api_key = cli.api_key.clone()
-        .or_else(|| env::var(env_var_key).ok())
-        .or_else(|| {
-            match cli.provider {
-                ApiProvider::OpenAi => config.openai_api_key.clone(),
-                ApiProvider::Claude => config.claude_api_key.clone(),
-            }
-        })
-        .context(format!("API key is required. Provide it with --api-key or set {} environment variable", env_var_key))?;
+    // Get API key from CLI, env var, or config (not needed for ClaudeCode)
+    let api_key = if matches!(cli.provider, ApiProvider::ClaudeCode) {
+        String::new() // ClaudeCode doesn't need an API key
+    } else {
+        cli.api_key.clone()
+            .or_else(|| env::var(env_var_key).ok())
+            .or_else(|| {
+                match cli.provider {
+                    ApiProvider::OpenAi => config.openai_api_key.clone(),
+                    ApiProvider::Claude => config.claude_api_key.clone(),
+                    ApiProvider::ClaudeCode => None,
+                }
+            })
+            .context(format!("API key is required. Provide it with --api-key or set {} environment variable", env_var_key))?
+    };
 
     // Get endpoint from CLI or config
     let endpoint = cli.endpoint.clone().unwrap_or_else(|| {
         match cli.provider {
             ApiProvider::OpenAi => config.openai_endpoint.clone().unwrap_or_else(|| default_endpoint.to_string()),
             ApiProvider::Claude => config.claude_endpoint.clone().unwrap_or_else(|| default_endpoint.to_string()),
+            ApiProvider::ClaudeCode => String::new(), // No endpoint needed
         }
     });
 
@@ -539,6 +603,7 @@ fn main() -> Result<()> {
         match cli.provider {
             ApiProvider::OpenAi => config.openai_model.clone().unwrap_or_else(|| default_model.to_string()),
             ApiProvider::Claude => config.claude_model.clone().unwrap_or_else(|| default_model.to_string()),
+            ApiProvider::ClaudeCode => String::new(), // Model is handled by CLI
         }
     });
 
